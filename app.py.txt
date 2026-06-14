@@ -1,0 +1,203 @@
+import streamlit as st
+import sqlite3
+import pandas as pd
+
+DB_FILE = "iddaa.db"
+
+# -----------------------
+# VERITABANI
+# -----------------------
+
+def get_connection():
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
+
+def create_tables():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS matches(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        match_date TEXT,
+        home_team TEXT,
+        away_team TEXT,
+        odds_ms1 REAL,
+        odds_draw REAL,
+        odds_ms2 REAL,
+        result TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+# -----------------------
+# MOCK VERI
+# -----------------------
+
+def load_mock_data():
+
+    conn = get_connection()
+
+    df = pd.read_sql("SELECT * FROM matches", conn)
+
+    if len(df) == 0:
+
+        sample = pd.DataFrame([
+            ["2026-06-14","Galatasaray","Trabzonspor",1.55,3.80,5.20,"1"],
+            ["2026-06-14","Fenerbahçe","Konyaspor",1.42,4.10,6.10,"1"],
+            ["2026-06-14","Beşiktaş","Kasımpaşa",1.88,3.30,4.20,"2"],
+            ["2026-06-14","Başakşehir","Antalyaspor",1.60,3.70,5.00,"1"],
+            ["2026-06-14","Sivasspor","Kayserispor",2.10,3.10,3.40,"0"]
+        ])
+
+        sample.columns = [
+            "match_date",
+            "home_team",
+            "away_team",
+            "odds_ms1",
+            "odds_draw",
+            "odds_ms2",
+            "result"
+        ]
+
+        sample.to_sql(
+            "matches",
+            conn,
+            if_exists="append",
+            index=False
+        )
+
+    conn.close()
+
+# -----------------------
+# ANALIZ
+# -----------------------
+
+def analyze_ms1(odd):
+
+    conn = get_connection()
+
+    df = pd.read_sql(
+        "SELECT * FROM matches WHERE result IS NOT NULL",
+        conn
+    )
+
+    conn.close()
+
+    if len(df) == 0:
+        return 0,0
+
+    similar = df[
+        (df["odds_ms1"] >= odd - 0.05) &
+        (df["odds_ms1"] <= odd + 0.05)
+    ]
+
+    sample = len(similar)
+
+    if sample == 0:
+        return 0,0
+
+    success = len(
+        similar[
+            similar["result"] == "1"
+        ]
+    )
+
+    return sample, round(success/sample*100,2)
+
+# -----------------------
+# UI
+# -----------------------
+
+st.set_page_config(
+    page_title="İddaa Analiz Sistemi",
+    layout="wide"
+)
+
+create_tables()
+load_mock_data()
+
+st.title("⚽ İddaa Oran Analiz Sistemi")
+
+today_matches = pd.DataFrame([
+    {
+        "Ev Sahibi":"Galatasaray",
+        "Deplasman":"Trabzonspor",
+        "MS1":1.55,
+        "MS0":3.80,
+        "MS2":5.20
+    },
+    {
+        "Ev Sahibi":"Fenerbahçe",
+        "Deplasman":"Konyaspor",
+        "MS1":1.42,
+        "MS0":4.10,
+        "MS2":6.10
+    },
+    {
+        "Ev Sahibi":"Beşiktaş",
+        "Deplasman":"Kasımpaşa",
+        "MS1":1.88,
+        "MS0":3.30,
+        "MS2":4.20
+    }
+])
+
+st.subheader("Bugünkü Maçlar")
+
+st.dataframe(
+    today_matches,
+    use_container_width=True
+)
+
+st.subheader("Oran Analizi")
+
+analysis_rows = []
+
+for _, row in today_matches.iterrows():
+
+    sample, rate = analyze_ms1(
+        row["MS1"]
+    )
+
+    analysis_rows.append({
+        "Maç":
+        f"{row['Ev Sahibi']} - {row['Deplasman']}",
+
+        "MS1":
+        row["MS1"],
+
+        "Benzer Maç":
+        sample,
+
+        "Geçmiş Başarı %":
+        rate
+    })
+
+analysis_df = pd.DataFrame(
+    analysis_rows
+)
+
+st.dataframe(
+    analysis_df,
+    use_container_width=True
+)
+
+st.subheader("Veritabanındaki Geçmiş Maçlar")
+
+conn = get_connection()
+
+history = pd.read_sql(
+    "SELECT * FROM matches",
+    conn
+)
+
+conn.close()
+
+st.dataframe(
+    history,
+    use_container_width=True
+)
+
+st.success("Sistem çalışıyor.")
